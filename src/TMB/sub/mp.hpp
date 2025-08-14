@@ -15,6 +15,7 @@ Type mp(objective_function<Type>* obj) {
   DATA_IVECTOR(isd);                //  indexes observations (1) vs. interpolation points (0)
   DATA_IVECTOR(obs_mod);            //  indicates which obs error model to be used
   DATA_ARRAY_INDICATOR(keep, Y);    // for one step predictions
+  DATA_MATRIX(E);                   //  environmental covariate matrix
   
   // for KF observation model
   DATA_VECTOR(m);                 //  m is the semi-minor axis length
@@ -31,6 +32,7 @@ Type mp(objective_function<Type>* obj) {
   PARAMETER(l_rho_p);           //  Innovation correlation (link scale)
   PARAMETER_ARRAY(X);           //  Predicted locations TP - length(X) should be same as length(dt) - i.e. both interp & obs pos.
   PARAMETER_VECTOR(lg);
+  PARAMETER_VECTOR(beta);       //  Environmental covariate coefficients
   // OBSERVATION PARAMETERS
   // for KF OBS MODEL
   PARAMETER(l_psi); 				    // error SD scaling parameter to account for possible uncertainty in Argos error ellipse variables
@@ -66,9 +68,15 @@ Type mp(objective_function<Type>* obj) {
   vector<Type> mu(2);
   
   // PROCESS MODEL
-  // RW on logit(gamma)
+  // RW on logit(gamma) with environmental covariate bias
   for(int i = 1; i < dt.size(); ++i) {
-    jnll -= dnorm(lg(i), lg(i-1), dt(i) * sigma_g, TRUE);  
+    Type env_bias = 0.0;
+    if(E.cols() > 0 && beta.size() > 0) {
+      for(int j = 0; j < E.cols(); ++j) {
+        env_bias += E(i, j) * beta(j);
+      }
+    }
+    jnll -= dnorm(lg(i), lg(i-1) + env_bias, dt(i) * sigma_g, TRUE);  
   }
   // CRW on location first differences
   // RW on first state
@@ -141,6 +149,9 @@ Type mp(objective_function<Type>* obj) {
   ADREPORT(tau);
   ADREPORT(psi);
   ADREPORT(sigma_g);
+  if(beta.size() > 0) {
+    ADREPORT(beta);
+  }
   
   return jnll;
 }

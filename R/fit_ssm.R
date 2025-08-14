@@ -42,6 +42,8 @@
 ##' (see [aniMotum::ssm_control] for details)
 ##' @param inner.control list of control settings for the inner optimizer 
 ##' (see [TMB::MakeADFun] for additional details)
+##' @param env_formula formula for environmental covariates (mp model only)
+##' @param env_data data.frame of environmental covariates on time step scale (mp model only)
 ##' @param ... variable name arguments passed to format_data, see 
 ##' [aniMotum::format_data] for details 
 ##'
@@ -144,6 +146,8 @@ fit_ssm <- function(x,
                     fit.to.subset = TRUE,
                     control = ssm_control(),
                     inner.control = NULL,
+                    env_formula = NULL,
+                    env_data = NULL,
                     ...
                     )
 {
@@ -157,6 +161,21 @@ fit_ssm <- function(x,
     stop("x must be a data.frame, tibble or sf-tibble, see `?fit_ssm for details`")
   if(!is.logical(pf)) 
     stop("pf must be either FALSE (fit model) or TRUE (only run prefilter)")
+  
+  ## check environmental covariate arguments for mp model
+  if(model == "mp") {
+    if(!is.null(env_formula) && is.null(env_data)) 
+      stop("env_data must be provided when env_formula is specified")
+    if(is.null(env_formula) && !is.null(env_data)) 
+      stop("env_formula must be provided when env_data is specified")
+    if(!is.null(env_formula) && !inherits(env_formula, "formula")) 
+      stop("env_formula must be a formula object")
+    if(!is.null(env_data) && !is.data.frame(env_data)) 
+      stop("env_data must be a data.frame")
+  } else {
+    if(!is.null(env_formula) || !is.null(env_data)) 
+      stop("Environmental covariates (env_formula, env_data) can only be used with mp model")
+  }
   
 ## warnings for deprecated arguments
   if(all("verbose" %in% names(dots), !is.null(dots$verbose))) {
@@ -235,7 +254,9 @@ fit_ssm <- function(x,
                         map = map,
                         fit.to.subset = fit.to.subset,
                         control = control,
-                        inner.control = inner.control
+                        inner.control = inner.control,
+                        env_formula = env_formula,
+                        env_data = env_data
                       )
                     })
       

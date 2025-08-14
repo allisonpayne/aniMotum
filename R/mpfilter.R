@@ -22,6 +22,8 @@
 ##' @param control list of control parameters for the outer optimization (see \code{ssm_control} for details)
 ##' @param inner.control list of control settings for the inner optimization
 ##' (see ?TMB::MakeADFUN for additional details)
+##' @param env_formula formula for environmental covariates
+##' @param env_data data.frame of environmental covariates on time step scale
 ##' @param verbose is deprecated, use ssm_control(verbose = 1) instead, see \code{ssm_control} for details
 ##' @param optim is deprecated, use ssm_control(optim = "optim") instead, see \code{ssm_control} for details
 ##' @param optMeth is deprecated, use ssm_control(method = "L-BFGS-B") instead, see \code{ssm_control} for details
@@ -44,7 +46,9 @@ mpfilter <-
            map = NULL,
            fit.to.subset = TRUE,
            control = ssm_control(),
-           inner.control = NULL) {
+           inner.control = NULL,
+           env_formula = NULL,
+           env_data = NULL) {
     
     st <- proc.time()
     call <- match.call()
@@ -160,6 +164,31 @@ mpfilter <-
     
     xs <- cbind(x.init, y.init)
     
+    ## Process environmental covariates
+    E <- NULL
+    if (!is.null(env_formula) && !is.null(env_data)) {
+      ## Merge env_data with d.all based on date, interpolating missing values
+      env_data_full <- merge(d.all[, c("id", "date")], env_data, by = c("id", "date"), all.x = TRUE)
+      
+      ## Interpolate missing environmental values
+      env_vars <- names(env_data)[!names(env_data) %in% c("id", "date")]
+      for (var in env_vars) {
+        if (any(is.na(env_data_full[[var]]))) {
+          env_data_full[[var]] <- approx(x = env_data$date, y = env_data[[var]], 
+                                        xout = env_data_full$date, rule = 2)$y
+        }
+      }
+      
+      ## Create model matrix from formula
+      E_matrix <- model.matrix(env_formula, data = env_data_full)
+      ## Remove intercept column if present
+      if(colnames(E_matrix)[1] == "(Intercept)") {
+        E_matrix <- E_matrix[, -1, drop = FALSE]
+      }
+      
+      E <- E_matrix
+    }
+    
     if (is.null(parameters)) {
       ## Estimate stochastic innovations
       es <- xs[-1,] - xs[-nrow(xs),]
@@ -181,6 +210,11 @@ mpfilter <-
         l_tau = c(0, 0),
         l_rho_o = 0
       )
+      
+      ## Add beta parameters if environmental covariates are provided
+      if (!is.null(E) && ncol(E) > 0) {
+        parameters$beta <- rep(0, ncol(E))
+      }
     } 
     
     ## start to work out which obs_mod to use for each observation
@@ -248,7 +282,15 @@ mpfilter <-
       c = d.all$eor,
       K = cbind(d.all$emf.x, d.all$emf.y),
       GLerr = cbind(d.all$x.sd, d.all$y.sd)
-    ) 
+    )
+    
+    ## Add environmental covariate matrix if provided
+    if (!is.null(E)) {
+      data$E <- E
+    } else {
+      ## Create empty matrix if no environmental covariates
+      data$E <- matrix(0, nrow = nrow(d.all), ncol = 0)
+    } 
     
     ## TMB - create objective function
     if (is.null(inner.control) | !"smartsearch" %in% names(inner.control)) {
@@ -291,6 +333,16 @@ mpfilter <-
           l_psi=Inf,
           l_tau=c(Inf,Inf),
           l_rho_o=7)
+    
+    ## Add bounds for beta parameters if environmental covariates are provided
+    if (!is.null(E) && ncol(E) > 0) {
+      beta_bounds_L <- rep(-Inf, ncol(E))
+      beta_bounds_U <- rep(Inf, ncol(E))
+      names(beta_bounds_L) <- rep("beta", ncol(E))
+      names(beta_bounds_U) <- rep("beta", ncol(E))
+      L <- c(L, beta_bounds_L)
+      U <- c(U, beta_bounds_U)
+    }
     
     if(any(!is.null(control$lower))) {
       L[which(names(L) %in% names(control$lower))] <- unlist(control$lower)
